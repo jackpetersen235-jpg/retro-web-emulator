@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
+<title>Retro Web Emulator</title>
+<meta name="description" content="Play your own Nintendo game files (NES, SNES, N64, GB, GBA) right in your browser. Nothing is uploaded — files stay on your device." />
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --panel-2: #1f232c;
+    --border: #2a2f3a;
+    --text: #e8eaed;
+    --muted: #9aa3b2;
+    --accent: #e60012; /* Nintendo red */
+    --accent-hover: #ff2233;
+    --focus: #4da3ff;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    min-height: 100%;
+  }
+  .wrap {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 24px 16px 64px;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  header .logo {
+    width: 36px; height: 36px;
+    border-radius: 8px;
+    background: var(--accent);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px;
+    flex-shrink: 0;
+  }
+  header h1 {
+    font-size: 20px;
+    margin: 0;
+    letter-spacing: -0.01em;
+  }
+  header p {
+    margin: 2px 0 0;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .row {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  label {
+    display: block;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+  .field {
+    flex: 1;
+    min-width: 220px;
+  }
+  select, .file-btn, button.primary {
+    width: 100%;
+    padding: 12px 14px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--panel-2);
+    color: var(--text);
+    font-size: 14px;
+    appearance: none;
+    -webkit-appearance: none;
+  }
+  select:focus, .file-btn:focus-within, button.primary:focus {
+    outline: 2px solid var(--focus);
+    outline-offset: 1px;
+  }
+  .file-btn {
+    position: relative;
+    overflow: hidden;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .file-btn input[type=file] {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+  }
+  .file-name {
+    color: var(--muted);
+    font-size: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  button.primary {
+    margin-top: 18px;
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s ease;
+  }
+  button.primary:hover:not(:disabled) { background: var(--accent-hover); }
+  button.primary:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  button.secondary {
+    padding: 10px 16px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    font-size: 13px;
+    cursor: pointer;
+  }
+  button.secondary:hover { background: var(--panel-2); }
+  .notice {
+    display: flex;
+    gap: 10px;
+    font-size: 13px;
+    color: var(--muted);
+    line-height: 1.5;
+    padding: 12px 14px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+  .notice b { color: var(--text); }
+  #stage {
+    display: none;
+  }
+  #stage.active { display: block; }
+  #game-container {
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    background: #000;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  #game {
+    width: 100%;
+    height: 100%;
+  }
+  .toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 12px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .toolbar .meta {
+    font-size: 13px;
+    color: var(--muted);
+  }
+  #setup.hidden { display: none; }
+  footer {
+    text-align: center;
+    color: var(--muted);
+    font-size: 12px;
+    margin-top: 24px;
+  }
+  footer a { color: var(--muted); }
+  .err {
+    color: #ff6b6b;
+    font-size: 13px;
+    margin-top: 10px;
+    display: none;
+  }
+  .err.show { display: block; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo">🎮</div>
+    <div>
+      <h1>Retro Web Emulator</h1>
+      <p>Play NES · SNES · N64 · Game Boy · GBA files from your own device</p>
+    </div>
+  </header>
+
+  <div id="setup">
+    <div class="card">
+      <div class="row">
+        <div class="field">
+          <label for="system">System</label>
+          <select id="system">
+            <option value="nes">NES / Famicom (.nes)</option>
+            <option value="snes">SNES / Super Famicom (.sfc, .smc)</option>
+            <option value="n64">Nintendo 64 (.n64, .z64)</option>
+            <option value="gb">Game Boy / Color (.gb, .gbc)</option>
+            <option value="gba">Game Boy Advance (.gba)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="rom">Game file</label>
+          <div class="file-btn">
+            <span class="file-name" id="fileName">Choose a file from this computer&hellip;</span>
+            <span>📁</span>
+            <input type="file" id="rom" />
+          </div>
+        </div>
+      </div>
+      <button class="primary" id="startBtn" disabled>Load Game</button>
+      <div class="err" id="err"></div>
+    </div>
+
+    <div class="notice">
+      <span>🔒</span>
+      <div>
+        <b>Your files never leave this device.</b> The game file you choose is read directly
+        by your browser and handed to the emulator locally — it is never uploaded to any server.
+        Only use game files you've legally dumped from cartridges/discs you own.
+      </div>
+    </div>
+  </div>
+
+  <div id="stage">
+    <div id="game-container"><div id="game"></div></div>
+    <div class="toolbar">
+      <span class="meta" id="nowPlaying"></span>
+      <button class="secondary" id="resetBtn">Load a different game</button>
+    </div>
+  </div>
+
+  <footer>
+    Emulation powered by <a href="https://emulatorjs.org" target="_blank" rel="noopener">EmulatorJS</a>.
+    Runs entirely client-side.
+  </footer>
+</div>
+
+<script>
+(function () {
+  const systemSelect = document.getElementById('system');
+  const romInput = document.getElementById('rom');
+  const fileNameLabel = document.getElementById('fileName');
+  const startBtn = document.getElementById('startBtn');
+  const resetBtn = document.getElementById('resetBtn');
+  const setupEl = document.getElementById('setup');
+  const stageEl = document.getElementById('stage');
+  const nowPlaying = document.getElementById('nowPlaying');
+  const errEl = document.getElementById('err');
+
+  let selectedFile = null;
+
+  romInput.addEventListener('change', () => {
+    selectedFile = romInput.files && romInput.files[0] ? romInput.files[0] : null;
+    fileNameLabel.textContent = selectedFile ? selectedFile.name : 'Choose a file from this computer…';
+    startBtn.disabled = !selectedFile;
+    errEl.classList.remove('show');
+  });
+
+  function showError(msg) {
+    errEl.textContent = msg;
+    errEl.classList.add('show');
+  }
+
+  startBtn.addEventListener('click', () => {
+    if (!selectedFile) return;
+    startBtn.disabled = true;
+    startBtn.textContent = 'Loading…';
+
+    try {
+      const core = systemSelect.value;
+      const gameUrl = URL.createObjectURL(selectedFile);
+
+      window.EJS_player = '#game';
+      window.EJS_core = core;
+      window.EJS_pathtodata = 'https://cdn.jsdelivr.net/npm/emulatorjs@4.2.3/data/';
+      window.EJS_gameUrl = gameUrl;
+      window.EJS_gameName = selectedFile.name;
+      window.EJS_color = '#e60012';
+      window.EJS_startOnLoaded = true;
+      window.EJS_backgroundColor = '#000000';
+      window.EJS_alignStartButton = 'center';
+      window.EJS_Buttons = { fullscreen: true, saveState: true, loadState: true, screenshot: true, quickSave: true, quickLoad: true, gamepad: true, cheat: false, volume: true, mute: true };
+
+      setupEl.classList.add('hidden');
+      stageEl.classList.add('active');
+      nowPlaying.textContent = 'Now playing: ' + selectedFile.name + ' (' + core.toUpperCase() + ')';
+
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/emulatorjs@4.2.3/data/loader.js';
+      script.onerror = () => showError('Could not load the emulator engine. Check your internet connection and try again.');
+      document.body.appendChild(script);
+    } catch (e) {
+      showError('Something went wrong loading that file: ' + e.message);
+      startBtn.disabled = false;
+      startBtn.textContent = 'Load Game';
+    }
+  });
+
+  resetBtn.addEventListener('click', () => {
+    location.reload();
+  });
+})();
+</script>
+</body>
+</html>
