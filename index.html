@@ -3,9 +3,8 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
-<title>Google Docs Homework</title>
-<meta name="description" content="Homework notes and study documents." />
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%234285F4' d='M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z'/%3E%3Cpath fill='%23fff' d='M8 12h8v1.5H8zM8 15h8v1.5H8zM8 9h5v1.5H8z'/%3E%3C/svg%3E" />
+<title>Retro Web Emulator</title>
+<meta name="description" content="Play your own Nintendo game files (NES, SNES, N64, GB, GBA, DS) right in your browser. Nothing is uploaded — files stay on your device." />
 <style>
   :root {
     --bg: #0f1115;
@@ -197,6 +196,67 @@
     display: none;
   }
   .err.show { display: block; }
+  .save-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 14px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .save-row input[type=checkbox] {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--accent);
+  }
+  #library.hidden { display: none; }
+  #library h2 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+    margin: 0 0 10px;
+  }
+  .lib-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    margin-bottom: 8px;
+  }
+  .lib-item .lib-icon {
+    font-size: 20px;
+    flex-shrink: 0;
+  }
+  .lib-item .lib-info {
+    flex: 1;
+    min-width: 0;
+  }
+  .lib-item .lib-name {
+    font-size: 14px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .lib-item .lib-meta {
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .lib-item button {
+    padding: 8px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    font-size: 13px;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .lib-item button:hover { background: #262b35; }
+  .lib-item button.lib-delete:hover { background: #3a1f22; border-color: #6e2a30; color: #ff8f8f; }
 </style>
 </head>
 <body>
@@ -208,6 +268,13 @@
       <p>Play NES · SNES · N64 · Game Boy · GBA · DS files from your own device</p>
     </div>
   </header>
+
+  <div id="library" class="hidden">
+    <div class="card">
+      <h2>Saved Games</h2>
+      <div id="libraryList"></div>
+    </div>
+  </div>
 
   <div id="setup">
     <div class="card">
@@ -232,6 +299,10 @@
           </div>
         </div>
       </div>
+      <label class="save-row">
+        <input type="checkbox" id="saveToggle" checked />
+        <span>Save this game to my library on this device (so I don't have to re-browse for it next time)</span>
+      </label>
       <button class="primary" id="startBtn" disabled>Load Game</button>
       <div class="err" id="err"></div>
     </div>
@@ -241,7 +312,9 @@
       <div>
         <b>Your files never leave this device.</b> The game file you choose is read directly
         by your browser and handed to the emulator locally — it is never uploaded to any server.
-        Only use game files you've legally dumped from cartridges/discs you own.
+        If you check "Save to my library," the file is stored in this browser's local storage
+        (IndexedDB) on this device only — it still never touches a server, and clearing your
+        browser data will remove it. Only use game files you've legally dumped from cartridges/discs you own.
       </div>
     </div>
   </div>
@@ -262,17 +335,138 @@
 
 <script>
 (function () {
+  const DB_NAME = 'retroEmuLibrary';
+  const STORE_NAME = 'games';
+
   const systemSelect = document.getElementById('system');
   const romInput = document.getElementById('rom');
   const fileNameLabel = document.getElementById('fileName');
+  const saveToggle = document.getElementById('saveToggle');
   const startBtn = document.getElementById('startBtn');
   const resetBtn = document.getElementById('resetBtn');
   const setupEl = document.getElementById('setup');
   const stageEl = document.getElementById('stage');
   const nowPlaying = document.getElementById('nowPlaying');
   const errEl = document.getElementById('err');
+  const libraryEl = document.getElementById('library');
+  const libraryListEl = document.getElementById('libraryList');
 
   let selectedFile = null;
+
+  // ---------- IndexedDB helpers ----------
+  function openDb() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(DB_NAME, 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(STORE_NAME)) {
+          db.createObjectStore(STORE_NAME, { keyPath: 'id', autoIncrement: true });
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  async function dbAdd(record) {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readwrite');
+      const req = tx.objectStore(STORE_NAME).add(record);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  async function dbGetAll() {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readonly');
+      const req = tx.objectStore(STORE_NAME).getAll();
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  async function dbGet(id) {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readonly');
+      const req = tx.objectStore(STORE_NAME).get(id);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  async function dbDelete(id) {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readwrite');
+      const req = tx.objectStore(STORE_NAME).delete(id);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  function formatSize(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  }
+
+  function systemLabel(core) {
+    const map = { nes: 'NES', snes: 'SNES', n64: 'N64', gb: 'Game Boy', gba: 'GBA', nds: 'DS' };
+    return map[core] || core.toUpperCase();
+  }
+
+  async function renderLibrary() {
+    let games = [];
+    try {
+      games = await dbGetAll();
+    } catch (e) {
+      libraryEl.classList.add('hidden');
+      return;
+    }
+    if (!games.length) {
+      libraryEl.classList.add('hidden');
+      return;
+    }
+    games.sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0));
+    libraryListEl.innerHTML = '';
+    games.forEach((g) => {
+      const item = document.createElement('div');
+      item.className = 'lib-item';
+      item.innerHTML =
+        '<span class="lib-icon">🎮</span>' +
+        '<div class="lib-info">' +
+          '<div class="lib-name"></div>' +
+          '<div class="lib-meta"></div>' +
+        '</div>' +
+        '<button class="lib-play">Play</button>' +
+        '<button class="lib-delete">Remove</button>';
+      item.querySelector('.lib-name').textContent = g.name;
+      item.querySelector('.lib-meta').textContent = systemLabel(g.system) + ' · ' + formatSize(g.size);
+      item.querySelector('.lib-play').addEventListener('click', () => playFromLibrary(g.id));
+      item.querySelector('.lib-delete').addEventListener('click', async () => {
+        await dbDelete(g.id);
+        renderLibrary();
+      });
+      libraryListEl.appendChild(item);
+    });
+    libraryEl.classList.remove('hidden');
+  }
+
+  async function playFromLibrary(id) {
+    const record = await dbGet(id);
+    if (!record) return;
+    const blob = new Blob([record.data]);
+    launchGame(record.system, record.name, blob);
+  }
+
+  function showError(msg) {
+    errEl.textContent = msg;
+    errEl.classList.add('show');
+  }
 
   romInput.addEventListener('change', () => {
     selectedFile = romInput.files && romInput.files[0] ? romInput.files[0] : null;
@@ -281,34 +475,25 @@
     errEl.classList.remove('show');
   });
 
-  function showError(msg) {
-    errEl.textContent = msg;
-    errEl.classList.add('show');
-  }
-
-  startBtn.addEventListener('click', () => {
-    if (!selectedFile) return;
-    startBtn.disabled = true;
-    startBtn.textContent = 'Loading…';
-
+  function launchGame(core, name, blob) {
     try {
-      const core = systemSelect.value;
-      const gameUrl = URL.createObjectURL(selectedFile);
+      const gameUrl = URL.createObjectURL(blob);
 
       window.EJS_player = '#game';
       window.EJS_core = core;
       window.EJS_pathtodata = 'https://cdn.jsdelivr.net/npm/emulatorjs@4.2.3/data/';
       window.EJS_gameUrl = gameUrl;
-      window.EJS_gameName = selectedFile.name;
+      window.EJS_gameName = name;
       window.EJS_color = '#e60012';
       window.EJS_startOnLoaded = true;
       window.EJS_backgroundColor = '#000000';
       window.EJS_alignStartButton = 'center';
       window.EJS_Buttons = { fullscreen: true, saveState: true, loadState: true, screenshot: true, quickSave: true, quickLoad: true, gamepad: true, cheat: false, volume: true, mute: true };
 
+      libraryEl.classList.add('hidden');
       setupEl.classList.add('hidden');
       stageEl.classList.add('active');
-      nowPlaying.textContent = 'Now playing: ' + selectedFile.name + ' (' + core.toUpperCase() + ')';
+      nowPlaying.textContent = 'Now playing: ' + name + ' (' + core.toUpperCase() + ')';
 
       const script = document.createElement('script');
       script.src = 'https://cdn.jsdelivr.net/npm/emulatorjs@4.2.3/data/loader.js';
@@ -319,11 +504,34 @@
       startBtn.disabled = false;
       startBtn.textContent = 'Load Game';
     }
+  }
+
+  startBtn.addEventListener('click', async () => {
+    if (!selectedFile) return;
+    startBtn.disabled = true;
+    startBtn.textContent = 'Loading…';
+
+    const core = systemSelect.value;
+    const fileToPlay = selectedFile;
+
+    if (saveToggle.checked) {
+      try {
+        const data = await fileToPlay.arrayBuffer();
+        await dbAdd({ name: fileToPlay.name, system: core, size: fileToPlay.size, savedAt: Date.now(), data });
+      } catch (e) {
+        // Storage can fail (quota, private browsing, etc.) — don't block playing the game over it.
+        console.warn('Could not save game to library:', e);
+      }
+    }
+
+    launchGame(core, fileToPlay.name, fileToPlay);
   });
 
   resetBtn.addEventListener('click', () => {
     location.reload();
   });
+
+  renderLibrary();
 })();
 </script>
 </body>
