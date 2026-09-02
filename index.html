@@ -482,7 +482,7 @@
 
       window.EJS_player = '#game';
       window.EJS_core = core;
-      window.EJS_pathtodata = 'https://cdn.jsdelivr.net/npm/emulatorjs@4.2.3/data/';
+      window.EJS_pathtodata = 'https://cdn.emulatorjs.org/stable/data/';
       window.EJS_gameUrl = gameUrl;
       window.EJS_gameName = name;
       window.EJS_color = '#e60012';
@@ -497,14 +497,25 @@
       nowPlaying.textContent = 'Now playing: ' + name + ' (' + core.toUpperCase() + ')';
 
       const script = document.createElement('script');
-      script.src = 'https://cdn.jsdelivr.net/npm/emulatorjs@4.2.3/data/loader.js';
-      script.onerror = () => showError('Could not load the emulator engine. Check your internet connection and try again.');
+      script.src = 'https://cdn.emulatorjs.org/stable/data/loader.js';
+      script.onerror = () => {
+        restoreSetup();
+        showError('Could not load the emulator engine. Check your internet connection and try again.');
+      };
       document.body.appendChild(script);
     } catch (e) {
+      restoreSetup();
       showError('Something went wrong loading that file: ' + e.message);
-      startBtn.disabled = false;
-      startBtn.textContent = 'Load Game';
     }
+  }
+
+  // Bring the setup screen back so errors (which live inside it) are visible again.
+  function restoreSetup() {
+    stageEl.classList.remove('active');
+    setupEl.classList.remove('hidden');
+    renderLibrary();
+    startBtn.disabled = false;
+    startBtn.textContent = 'Load Game';
   }
 
   startBtn.addEventListener('click', async () => {
