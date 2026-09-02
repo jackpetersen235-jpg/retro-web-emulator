@@ -469,11 +469,30 @@
     errEl.classList.add('show');
   }
 
+  // Map a file extension to the core that can actually run it.
+  const EXT_TO_SYSTEM = {
+    nes: 'nes', fds: 'nes',
+    sfc: 'snes', smc: 'snes',
+    n64: 'n64', z64: 'n64', v64: 'n64',
+    gb: 'gb', gbc: 'gb',
+    gba: 'gba',
+    nds: 'nds',
+  };
+
   romInput.addEventListener('change', () => {
     selectedFile = romInput.files && romInput.files[0] ? romInput.files[0] : null;
     fileNameLabel.textContent = selectedFile ? selectedFile.name : 'Choose a file from this computer…';
     startBtn.disabled = !selectedFile;
     errEl.classList.remove('show');
+
+    if (selectedFile) {
+      const ext = selectedFile.name.split('.').pop().toLowerCase();
+      const detected = EXT_TO_SYSTEM[ext];
+      if (detected && systemSelect.value !== detected) {
+        systemSelect.value = detected;
+        showError('Switched System to ' + systemLabel(detected) + ' to match "' + selectedFile.name + '". Change it back if that\'s wrong.');
+      }
+    }
   });
 
   function launchGame(core, name, blob) {
